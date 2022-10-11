@@ -121,11 +121,6 @@ void decodeProtocol(_sDato *);
  */
 void decodeData(_sDato *);
 
-/**
- * @brief Envía los datos a la PC puerto Serie
- * La función consulta si el puerto serie está libre para escribir, si es así envía 1 byte y retorna
- */
-void sendData(_sDato *);
 
 /**
  * @brief  Función Hearbeat
@@ -144,8 +139,17 @@ void hearbeatTask(uint32_t *generalTime);
  */
 void comunicationsTask(_sDato *datosCom, uint8_t source);
 
+/**
+ * @brief Envía el Alive de manera automática cuando el WIFI esta conectado
+ * 
+ * @param aliveAutoTime variable que controla el tiempo de envio
+ */
 void aliveAutoTask(uint32_t *aliveAutoTime);
 
+/**
+ * @brief envía los datos de conexión al Wifi si estubieran definidos
+ * 
+ */
 void autoConnectWifi(void);
 
 
@@ -334,16 +338,6 @@ void decodeData(_sDato *datosCom)
 
 
 /*****************************************************************************************************/
-/************  Función para enviar los bytes hacia la pc ***********************/
-void sendData(_sDato *datosCom)
-{
-    if(pcCom.writeable())
-        pcCom.putc(datosCom->bufferTx[datosCom->indexReadTx++]);
-
-}
-
-
-/*****************************************************************************************************/
 /************  Función para hacer el hearbeats ***********************/
 void hearbeatTask(uint32_t *generalTime)
 {
@@ -363,10 +357,14 @@ void comunicationsTask(_sDato *datosCom, uint8_t source){
     }
 
     if(datosCom->indexReadTx!=datosCom->indexWriteTx){
-        if(source)
-            sendData(datosCom);
-        else
-            myWifi.writeWifiData(&datosCom->bufferTx[datosCom->indexReadTx++],1);   
+        if(source){
+            if(pcCom.writeable()){
+                pcCom.putc(datosCom->bufferTx[datosCom->indexReadTx++]);
+            }
+        }
+        else{
+            myWifi.writeWifiData(&datosCom->bufferTx[datosCom->indexReadTx++],1);  
+        } 
     } 
 }
 
