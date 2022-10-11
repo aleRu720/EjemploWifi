@@ -13,9 +13,11 @@
 /*==================[ Local MAcros ]============================================*/
 #define STARTUPTIME     10000
 #define TIMETOCHECK     8000
-#define ALIVEAUTO       60000
+#define RESETTIME       500
+
 static uint16_t delayrespuesta=10;
 #define DELAYRESPONSE  delayrespuesta
+
 /*==================[ Local variables ]============================================*/
 uint8_t *buffRx;                    //!< Puntero local al bufer circular de recepción
 uint8_t *indexRxWrite;              //!< Puntero local al indice de escritura del bufer circular de recepción
@@ -23,6 +25,7 @@ static uint32_t maxBufferLength;    //!< Variable local tamaño del bufer circul
 static wifiData *dataConfigwifi;    //!< Puntero local a los datos de configuración
 static bool configActive=false;     //!< Flag de configuración activa
 static bool startUpActive=true;     //!< Flag de inicio de chequeo del ESP
+static uint8_t numTimeSend, numTimeRecive;
 /*==================[ Local Prototypes ]============================================*/
 /**
  * @brief Función que se  llama cuando ocurre la IRQ_Rx
@@ -75,6 +78,7 @@ static _eEstadoESP espState=CWMODE_DEF;
  * 
  */
 typedef enum{
+        RESETWIFI,
         STARTUP,
         STANBY,
         CONFIG,
@@ -90,6 +94,8 @@ uint32_t timeWifi=0;
 
 uint32_t timestartUp=0;
 
+uint32_t timerReset=0;
+
 DigitalOut chipEnableESP(PA_3);
 
 RawSerial wifiCom(PB_10,PB_11,115200);
@@ -102,7 +108,7 @@ Wifi::Wifi(uint8_t *buff, uint8_t *indexWRx, uint32_t lengthBuff)
     indexRxWrite=indexWRx;
     maxBufferLength=lengthBuff;
     esp8266Data.indexReadRx=esp8266Data.indexReadTx=esp8266Data.indexWriteRx=esp8266Data.indexWriteTx=0;
-    wifiTaskState=STARTUP;
+    wifiTaskState=RESETWIFI;
     numTimeSend=numTimeRecive=0;
 }
 
@@ -129,6 +135,21 @@ void Wifi::taskWifi(){
     
     switch (wifiTaskState)
     {
+    case RESETWIFI:
+    if((timerWifi.read_us()-timerReset)>=RESETTIME){
+        timerReset=timerWifi.read_us();
+        if(chipEnableESP.read()){
+            chipEnableESP.write(false);   
+        }else{
+            chipEnableESP.write(true);
+            espState=CWMODE_DEF;
+            wifiTaskState=STARTUP;
+            numTimeSend=numTimeRecive=0;
+            timeWifi=timerWifi.read_ms();
+            timestartUp=timerWifi.read_ms();
+        }
+    }   
+    break;
     case STARTUP:
         if((timerWifi.read_ms()-timeWifi)>=STARTUPTIME){
             startUpActive=false;
@@ -163,17 +184,13 @@ void Wifi::taskWifi(){
     case READY:
         if(esp8266Data.indexReadTx!=esp8266Data.indexWriteTx)
             wifiSend();
-        if((timerWifi.read_ms()-timeWifi)>=ALIVEAUTO){
-            timeWifi=timerWifi.read_ms();
-            aliveAuto();
-        }
         break;
     default:
         break;
     }
 }
 
-bool Wifi::isWifiReady(){
+uint8_t Wifi::isWifiReady(){
     return wifiReady;
 }
 
@@ -182,17 +199,11 @@ void Wifi::initTask(){
     wifiCom.attach (&onDataRx, RawSerial::RxIrq);
     timerWifi.start();
     timestartUp=timerWifi.read_ms();
+    timerReset=timerWifi.read_us();
 }
 
 void Wifi::resetWifi(){
-    chipEnableESP.write(false);
-    wait_us(10);
-    chipEnableESP.write(true);
-    espState=CWMODE_DEF;
-    wifiTaskState=STARTUP;
-    numTimeSend=numTimeRecive=0;
-    timeWifi=timerWifi.read_ms();
-    timestartUp=timerWifi.read_ms();
+    wifiTaskState=RESETWIFI;
 }
 /*==================[ Private c Methods ]============================================*/
 
@@ -345,7 +356,6 @@ void Wifi::configWifiMef(wifiData *parameters){
         }
         break;
     case AUTOMATIC:
-        aliveAuto();
         wifiTaskState=READY;
         configActive=false;
         wifiReady=true;
@@ -362,17 +372,6 @@ void Wifi::configWifiMef(wifiData *parameters){
     }
 }
 
-void Wifi::aliveAuto(){
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]='U';
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]='N';
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]='E';
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]='R';
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]=0x03;
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]=':';
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]=ALIVE;
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]=0x0D;
-    esp8266Data.bufferTx[esp8266Data.indexWriteTx++]=0xC8;
-}
 
 bool Wifi::wifiResponse(const char *subcadena, unsigned char stopSearch){
     uint8_t indexSub=0, respuesta=false;

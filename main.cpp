@@ -10,6 +10,7 @@
 
 #define     MASKHB              0x0F
 
+#define     ALIVEAUTOINTERVAL   60000
 
 /**
  * @brief Enumeración de la MEF para decodificar el protocolo
@@ -57,8 +58,8 @@ typedef struct{
     uint8_t indexReadRx;     //!< Indice de lectura del buffer circular de recepción
     uint8_t indexWriteTx;    //!< Indice de escritura del buffer circular de transmisión
     uint8_t indexReadTx;     //!< Indice de lectura del buffer circular de transmisión
-    uint8_t bufferRx[256];   //!< Buffer circular de recepción
-    uint8_t bufferTx[256];   //!< Buffer circular de transmisión
+    uint8_t bufferRx[RINGBUFFLENGTH];   //!< Buffer circular de recepción
+    uint8_t bufferTx[RINGBUFFLENGTH];   //!< Buffer circular de transmisión
 }_sDato ;
 
  _sDato datosComSerie, datosComWifi;
@@ -96,7 +97,6 @@ typedef union {
 
 _bFlags myFlags;
 
-#define AUTOCONNECT     myFlags.individualFlags.bit0
 
 /*************************************************************************************************/
 /* Prototipo de Funciones */
@@ -127,12 +127,26 @@ void decodeData(_sDato *);
  */
 void sendData(_sDato *);
 
+/**
+ * @brief  Función Hearbeat
+ * Ejecuta las tareas del hearbeat
+ * 
+ * @param generalTime variable para almacenar el tiempo
+ */
+void hearbeatTask(uint32_t *generalTime);
+
 
 /**
- * @brief Función Hearbeat
- * Ejecuta las tareas del hearbeat 
+ * @brief Rutina para revisar los buffers de comunicación, decodificar y transmitar según sea necesario
+ * 
+ * @param datosCom Puntero a la estructura de datos del buffer
+ * @param source flag que indica el módulo a donde transmitir
  */
-void hearbeatTask(void);
+void comunicationsTask(_sDato *datosCom, uint8_t source);
+
+void aliveAutoTask(uint32_t *aliveAutoTime);
+
+void autoConnectWifi(void);
 
 
 /*****************************************************************************************************/
@@ -155,58 +169,25 @@ Wifi myWifi(datosComWifi.bufferRx,&datosComWifi.indexWriteRx, sizeof(datosComWif
 /*********************************  Función Principal ************************************************/
 int main()
 {
-    AUTOCONNECT = true;
 
-    int generalTime=0;
+    uint32_t generalTime=0, aliveAutoTime=0;
 
     miTimer.start();
 
     pcCom.attach(&onDataRx,RawSerial::RxIrq);
 
     myWifi.initTask();
+
+    autoConnectWifi();
     
     while(true)
     {
 
         myWifi.taskWifi();
-        #ifdef AUTOCONNECTWIFI
-            if(AUTOCONNECT){
-                AUTOCONNECT=false;
-                memcpy(&myWifiData.cwmode, dataCwmode, sizeof(myWifiData.cwmode));
-                memcpy(&myWifiData.cwdhcp,dataCwdhcp, sizeof(myWifiData.cwdhcp) );
-                memcpy(&myWifiData.cwjap,dataCwjap, sizeof(myWifiData.cwjap) );
-                memcpy(&myWifiData.cipmux,dataCipmux, sizeof(myWifiData.cipmux) );
-                memcpy(&myWifiData.cipstart,dataCipstart, sizeof(myWifiData.cipstart) );
-                memcpy(&myWifiData.cipmode,dataCipmode, sizeof(myWifiData.cipmode) );
-                memcpy(&myWifiData.cipsend,dataCipsend, sizeof(myWifiData.cipsend) );
-                myWifi.configWifi(&myWifiData);
-            }
-        #endif
-
-        /******************** TIMER GENERAL DE 100 MS ********************/
-        if ((miTimer.read_ms()-generalTime)>=GENERALINTERVAL){
-            generalTime=miTimer.read_ms();
-            hearbeatTask();
-        }
-       
-        /****************** puerto serie RX Y TX ***********************/
-        if(datosComSerie.indexReadRx!=datosComSerie.indexWriteRx){ 
-            decodeProtocol(&datosComSerie);
-        }
-
-        if(datosComSerie.indexReadTx!=datosComSerie.indexWriteTx){
-            sendData(&datosComSerie);
-        } 
- 
-       //********************** wifi RX Y TX ************************/
-        if(datosComWifi.indexReadRx!=datosComWifi.indexWriteRx){
-            decodeProtocol(&datosComWifi);
-        }
-
-        if(datosComWifi.indexReadTx!=datosComWifi.indexWriteTx){
-            myWifi.writeWifiData(&datosComWifi.bufferTx[datosComWifi.indexReadTx++],1);
-        }
-        
+        hearbeatTask(&generalTime);
+        comunicationsTask(&datosComSerie,true);
+        comunicationsTask(&datosComWifi,false);
+        aliveAutoTask(&aliveAutoTime);        
     }
     return 0;
 }
@@ -364,14 +345,44 @@ void sendData(_sDato *datosCom)
 
 /*****************************************************************************************************/
 /************  Función para hacer el hearbeats ***********************/
-void hearbeatTask(void)
+void hearbeatTask(uint32_t *generalTime)
 {
     static uint8_t indexHb=0;
-    HEARBEAT.write( (~SECUENCEHB) & (1<<indexHb));
-    indexHb++;
-    indexHb &=MASKHB;   
+    if ((miTimer.read_ms()-*generalTime)>=GENERALINTERVAL){
+            *generalTime=miTimer.read_ms();       
+        HEARBEAT.write( (~SECUENCEHB) & (1<<indexHb));
+        indexHb++;
+        indexHb &=MASKHB;  
+    }   
 }
 
+
+void comunicationsTask(_sDato *datosCom, uint8_t source){
+    if(datosCom->indexReadRx!=datosCom->indexWriteRx ){
+            decodeProtocol(datosCom);
+    }
+
+    if(datosCom->indexReadTx!=datosCom->indexWriteTx){
+        if(source)
+            sendData(datosCom);
+        else
+            myWifi.writeWifiData(&datosCom->bufferTx[datosCom->indexReadTx++],1);   
+    } 
+}
+
+
+void aliveAutoTask(uint32_t *aliveAutoTime){
+    if(myWifi.isWifiReady()){
+        if((miTimer.read_ms()-*aliveAutoTime)>=ALIVEAUTOINTERVAL){
+            *aliveAutoTime=miTimer.read_ms();
+            datosComWifi.bufferRx[datosComWifi.indexWriteRx+2]=GETALIVE;
+            datosComWifi.indexStart=datosComWifi.indexWriteRx;
+            decodeData(&datosComWifi);
+        }
+    }else{
+        *aliveAutoTime=0;
+    }
+}
 
 /**********************************************************************************/
 /* Servicio de Interrupciones*/
@@ -382,4 +393,21 @@ void onDataRx(void)
     {
         datosComSerie.bufferRx[datosComSerie.indexWriteRx++]=pcCom.getc();
     }
+}
+/* FIN Servicio de Interrupciones*/
+/**********************************************************************/
+
+/**********************************AUTO CONNECT WIF*********************/
+
+void autoConnectWifi(){
+    #ifdef AUTOCONNECTWIFI
+        memcpy(&myWifiData.cwmode, dataCwmode, sizeof(myWifiData.cwmode));
+        memcpy(&myWifiData.cwdhcp,dataCwdhcp, sizeof(myWifiData.cwdhcp) );
+        memcpy(&myWifiData.cwjap,dataCwjap, sizeof(myWifiData.cwjap) );
+        memcpy(&myWifiData.cipmux,dataCipmux, sizeof(myWifiData.cipmux) );
+        memcpy(&myWifiData.cipstart,dataCipstart, sizeof(myWifiData.cipstart) );
+        memcpy(&myWifiData.cipmode,dataCipmode, sizeof(myWifiData.cipmode) );
+        memcpy(&myWifiData.cipsend,dataCipsend, sizeof(myWifiData.cipsend) );
+        myWifi.configWifi(&myWifiData);
+    #endif
 }

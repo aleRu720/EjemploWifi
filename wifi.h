@@ -69,7 +69,7 @@ class Wifi
          * @return true 
          * @return false 
          */
-        bool isWifiReady();
+        uint8_t isWifiReady();
         /**
          * @brief Iniciliza las tareas comunes
          * 
@@ -81,7 +81,7 @@ class Wifi
          */
         void resetWifi();
     private:
-        bool wifiReady=false;
+        uint8_t wifiReady=false;
         /**
          * @brief Envía los datos a travéz del ESP
          * 
@@ -102,12 +102,7 @@ class Wifi
          * @return false 
          */
         bool wifiResponse(const char *, unsigned char );
-        /**
-         * @brief Envía el comando ALIVE completo a la PC 
-         * 
-         */
-        void aliveAuto();
-        uint8_t numTimeSend, numTimeRecive;
+
    
 };
 #endif
