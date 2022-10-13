@@ -10,7 +10,11 @@
 
 #define     MASKHB              0x0F
 
-#define     ALIVEAUTOINTERVAL   60000
+#define     ALIVEAUTOINTERVAL   20000
+
+#define     POSID               4
+
+#define     POSDATA             5
 
 /**
  * @brief Enumeración de la MEF para decodificar el protocolo
@@ -186,7 +190,6 @@ int main()
     
     while(true)
     {
-
         myWifi.taskWifi();
         hearbeatTask(&generalTime);
         comunicationsTask(&datosComSerie,true);
@@ -195,8 +198,6 @@ int main()
     }
     return 0;
 }
-
-
 
 
 
@@ -280,8 +281,6 @@ void decodeProtocol(_sDato *datosCom)
 /************  Función para procesar el comando recibido ***********************/
 void decodeData(_sDato *datosCom)
 {
-    #define POSID   2
-    #define POSDATA 3
     wifiData *wifidataPtr;
     uint8_t *ptr; 
     uint8_t auxBuffTx[50], indiceAux=0, cheksum, sizeWifiData, indexBytesToCopy=0, numBytesToCopy=0;
@@ -292,17 +291,19 @@ void decodeData(_sDato *datosCom)
     auxBuffTx[indiceAux++]='R';
     auxBuffTx[indiceAux++]=0;
     auxBuffTx[indiceAux++]=':';
+    auxBuffTx[indiceAux++]=0x01;
+    auxBuffTx[indiceAux++]=0x00;
 
     switch (datosCom->bufferRx[datosCom->indexStart+POSID]) {
         case GETALIVE:
             auxBuffTx[indiceAux++]=GETALIVE;
             auxBuffTx[indiceAux++]=ACK;
-            auxBuffTx[NBYTES]=0x03;         
+            auxBuffTx[NBYTES]=0x05;         
             break;
         case STARTCONFIG: //Inicia Configuración del wifi 
             auxBuffTx[indiceAux++]=STARTCONFIG;
             auxBuffTx[indiceAux++]=ACK;
-            auxBuffTx[NBYTES]=0x03;     
+            auxBuffTx[NBYTES]=0x05;     
             myWifi.resetWifi();
             sizeWifiData =sizeof(myWifiData);
             indexBytesToCopy=datosCom->indexStart+POSDATA;
@@ -323,7 +324,7 @@ void decodeData(_sDato *datosCom)
         
         default:
             auxBuffTx[indiceAux++]=0xDD;
-            auxBuffTx[NBYTES]=0x02;
+            auxBuffTx[NBYTES]=0x04;
             break;
     }
    cheksum=0;
@@ -368,12 +369,11 @@ void comunicationsTask(_sDato *datosCom, uint8_t source){
     } 
 }
 
-
 void aliveAutoTask(uint32_t *aliveAutoTime){
     if(myWifi.isWifiReady()){
         if((miTimer.read_ms()-*aliveAutoTime)>=ALIVEAUTOINTERVAL){
             *aliveAutoTime=miTimer.read_ms();
-            datosComWifi.bufferRx[datosComWifi.indexWriteRx+2]=GETALIVE;
+            datosComWifi.bufferRx[datosComWifi.indexWriteRx+POSID]=GETALIVE;
             datosComWifi.indexStart=datosComWifi.indexWriteRx;
             decodeData(&datosComWifi);
         }
@@ -395,7 +395,7 @@ void onDataRx(void)
 /* FIN Servicio de Interrupciones*/
 /**********************************************************************/
 
-/**********************************AUTO CONNECT WIF*********************/
+/**********************************AUTO CONNECT WIFI *********************/
 
 void autoConnectWifi(){
     #ifdef AUTOCONNECTWIFI
