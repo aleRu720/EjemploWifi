@@ -81,7 +81,6 @@ class Wifi
          */
         void resetWifi();
     private:
-        uint8_t wifiReady=false;
         /**
          * @brief Envía los datos a travéz del ESP
          * 

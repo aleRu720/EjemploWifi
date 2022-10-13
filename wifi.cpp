@@ -26,6 +26,7 @@ static wifiData *dataConfigwifi;    //!< Puntero local a los datos de configurac
 static bool configActive=false;     //!< Flag de configuración activa
 static bool startUpActive=true;     //!< Flag de inicio de chequeo del ESP
 static uint8_t numTimeSend, numTimeRecive;
+static uint8_t wifiReady=false;
 /*==================[ Local Prototypes ]============================================*/
 /**
  * @brief Función que se  llama cuando ocurre la IRQ_Rx
@@ -67,8 +68,7 @@ typedef enum{
 			AWAITINGRESPONSE,
 			INCOMMINGRESPONSE,
             READYTOTRASMIT,
-			AUTOMATIC,
-            ALIVE=0xF0
+			AUTOMATIC
 } _eEstadoESP;
 
 static _eEstadoESP espState=CWMODE_DEF;
